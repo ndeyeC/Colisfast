@@ -18,6 +18,8 @@ use App\Http\Controllers\NavigationController;
 use App\Http\Controllers\SuiviLivraisonController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\UserMessagesController;
+use App\Http\Controllers\UserController;
+
 
 
 
@@ -96,8 +98,10 @@ Route::get('/commnandes/payment/success', [CommnandeController::class, 'paymentS
 Route::get('/commnandes/payment/cancel', [CommnandeController::class, 'paymentCancel'])->name('commnandes.payment.cancel');
 
 
+Route::match(['GET', 'POST'], '/commnandes/payment/ipn', [CommnandeController::class, 'ipnCallback'])
+     ->name('commnandes.payment.ipn');
 // Route IPN (ne nécessite pas d'authentification)
-Route::post('/commnandes/payment/ipn', [CommnandeController::class, 'ipnCallback'])->name('commnandes.payment.ipn');
+// Route::post('/commnandes/payment/ipn', [CommnandeController::class, 'ipnCallback'])->name('commnandes.payment.ipn');
 
 // Routes pour les commandes
 Route::get('/commnandes/create', [CommnandeController::class, 'create'])->name('commnandes.create');
@@ -273,8 +277,8 @@ Route::middleware(['auth', 'role:livreur'])->prefix('livreur')->name('livreur.')
          ->name('commandes.accepter');
     
     // Démarrer une livraison
-    Route::post('/commandes/{id}/demarrer', [LivreurController::class, 'demarrerLivraison'])
-         ->name('commandes.demarrer');
+    // Route::post('/commandes/{id}/demarrer', [LivreurController::class, 'demarrerLivraison'])
+    //      ->name('commandes.demarrer');
     
     // Terminer une livraison
     Route::post('/commandes/{id}/terminer', [LivreurController::class, 'terminerLivraison'])
@@ -303,7 +307,7 @@ Route::middleware(['auth:sanctum'])->prefix('api/livreur')->group(function() {
     Route::post('/commandes/{id}/accepter', [LivreurController::class, 'accepterCommande']);
     
     // API démarrer livraison
-    Route::post('/commandes/{id}/demarrer', [LivreurController::class, 'demarrerLivraison']);
+    // Route::post('/commandes/{id}/demarrer', [LivreurController::class, 'demarrerLivraison']);
     
     // API terminer livraison
     Route::post('/commandes/{id}/terminer', [LivreurController::class, 'terminerLivraison']);
@@ -389,10 +393,6 @@ Route::middleware(['auth', 'role:livreur'])->group(function () {
      Route::get('/livreur/livraisons/{commandeId}/navigation', [LivraisonEnCoursController::class, 'ouvrirNavigation'])
         ->name('livreur.ouvrir-navigation');
 
-    // Route::get('/livreur/livraisons/{commandeId}/navigation', [NavigationController::class, 'showNavigation'])
-    // ->name('livreur.ouvrir-navigation');
-
-    
     // Route pour obtenir le statut d'une livraison (pour les mises à jour AJAX)
     Route::get('/api/livraisons/{commandeId}/status', function($commandeId) {
         $commande = App\Models\Commnande::where('id', $commandeId)
@@ -437,6 +437,10 @@ Route::middleware(['auth', 'role:livreur'])->group(function () {
         ->name('api.livraison.update-position');
 });
 
+Route::get('/api/livraisons/{commandeId}/status', [LivraisonEnCoursController::class, 'getDeliveryStatus'])
+    ->name('api.livraison.status')
+    ->middleware(['auth', 'role:livreur']);
+
 // // Route pour naviguer vers les livraisons en cours (lien du menu)
 // Route::get('/livreur/livraison-cours', function() {
 //     return redirect()->route('livreur.livraison-cours');
@@ -466,7 +470,9 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     
     // Routes pour la gestion des problèmes
     Route::get('/livraisons/problemes/liste', [SuiviLivraisonController::class, 'problemesSignales'])->name('livraisons.problemes');
-    Route::post('/livraisons/{id}/resoudre-probleme', [LivraisonsController::class, 'resoudreProbleme'])->name('livraisons.resoudre-probleme');
+    Route::post('/livraisons/{id}/resoudre-probleme', [SuiviLivraisonController::class, 'resoudreProbleme'])->name('livraisons.resolve');
+
+    // Route::post('/livraisons/{id}/resoudre-probleme', [LivraisonsController::class, 'resoudreProbleme'])->name('livraisons.resoudre-probleme');
      Route::get('/livraisons/{id}/json', [SuiviLivraisonController::class, 'showJson'])->name('livraisons.json');
 
     
@@ -477,7 +483,10 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::get('/api/livraisons/{id}/details', [SuiviLivraisonController::class, 'getDetails'])->name('livraisons.details');
 });
 
+Route::post('/user/fcm-token', [UserController::class, 'saveFcmToken'])->middleware('auth');
 
 
+
+Route::get('/paiements/par-mois', [RevenuLivreurController::class, 'filterPaiementsParMois'])->name('paiements.par.mois');
 
 require __DIR__.'/auth.php';

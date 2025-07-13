@@ -17,6 +17,12 @@ class AppServiceProvider extends ServiceProvider
             ->createMessaging();
     });
 
+   // Enregistrement de GeocodingService
+        $this->app->singleton(GeocodingService::class, function ($app) {
+            return new GeocodingService();
+        });
+    
+
     }
 
     /**

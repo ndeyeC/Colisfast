@@ -89,6 +89,13 @@
         </div>
 
         <div class="mb-4">
+    <label class="block font-medium">Numéro de téléphone</label>
+    <input type="tel" name="numero_telephone" class="w-full p-3 border rounded" 
+           value="{{ old('numero_telephone') }}" 
+           placeholder="Ex: 77 123 45 67" required>
+</div>
+
+        <div class="mb-4">
             <label class="block font-medium">Type de livraison</label>
             <select name="type_livraison" class="w-full p-3 border rounded" required>
                 <option value="standard">Standard (+{{ $supplements['standard'] ?? 500 }} FCFA)</option>
@@ -108,7 +115,7 @@
         </div>
 
           <!-- Section de paiement -->
-        <div class="mb-6">
+        <!-- <div class="mb-6">
             <h3 class="font-medium mb-3 flex items-center">
                 Méthode de paiement
             </h3>
@@ -135,7 +142,7 @@
                         </span>
                     </span>
                 </label>
-                
+                 -->
                 <!-- <label class="block border rounded-lg p-4 hover:border-green-500 cursor-pointer transition-colors">
                     <input type="radio" name="payment" value="tokens" class="mr-2">
                     <span class="inline-flex items-center">
@@ -146,7 +153,50 @@
                         </span>
                     </span>
                 </label> -->
-            </div>
+            <!-- </div> -->
+             <!-- Section de paiement -->
+<div class="mb-6">
+    <h3 class="font-medium mb-3 flex items-center">
+        Méthode de paiement
+    </h3>
+    
+    <div class="space-y-3">
+        <label class="block border rounded-lg p-4 hover:border-green-500 cursor-pointer transition-colors">
+            <input type="radio" name="mode_paiement" value="wave" class="mr-2" required>
+            <span class="inline-flex items-center">
+                <i class="fab fa-wave-square text-purple-500 mr-2 text-xl"></i> 
+                <span>
+                    <span class="font-medium">Wave</span>
+                    <span class="text-xs block text-gray-500">Paiement mobile via Wave</span>
+                </span>
+            </span>
+        </label>
+        
+        <!-- CORRECTION: Changer la valeur de 'orange money' à 'orange' -->
+        <label class="block border rounded-lg p-4 hover:border-green-500 cursor-pointer transition-colors">
+            <input type="radio" name="mode_paiement" value="orange" class="mr-2">
+            <span class="inline-flex items-center">
+                <i class="fas fa-mobile-alt text-orange-500 mr-2 text-xl"></i> 
+                <span>
+                    <span class="font-medium">Orange Money</span>
+                    <span class="text-xs block text-gray-500">Paiement mobile via Orange Money</span>
+                </span>
+            </span>
+        </label>
+        
+        <!-- Option pour les jetons si nécessaire -->
+        <label class="block border rounded-lg p-4 hover:border-green-500 cursor-pointer transition-colors">
+            <input type="radio" name="mode_paiement" value="tokens" class="mr-2">
+            <span class="inline-flex items-center">
+                <i class="fas fa-coins text-yellow-500 mr-2 text-xl"></i> 
+                <span>
+                    <span class="font-medium">Jetons</span>
+                    <span class="text-xs block text-gray-500">Solde actuel: {{ Auth::user()->tokens ?? 0 }} jetons</span>
+                </span>
+            </span>
+        </label>
+    </div>
+</div>
             
            
         </div>
@@ -161,10 +211,6 @@
 
 
 <script>
-
-
-
-
 
 document.addEventListener('DOMContentLoaded', function() {
     // 1. Initialisation des données avec vérification de null

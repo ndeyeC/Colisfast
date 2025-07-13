@@ -4,6 +4,16 @@
 
 @section('page-title', 'Livraisons en cours')
 
+
+@section('styles')
+    <style>
+        #leafletMap { height: 400px; width: 100%; }
+        .start-marker, .end-marker, .current-position { text-align: center; }
+        .leaflet-popup-content-wrapper { max-width: 200px; }
+        #routeInstructions { max-height: 150px; overflow-y: auto; }
+    </style>
+@endsection
+
 @section('content')
 <!-- Current Delivery Section -->
 <div class="bg-white rounded-lg shadow-md mb-6">
@@ -292,13 +302,10 @@
                 <form id="deliveredForm" method="POST" enctype="multipart/form-data">
                     @csrf
                     <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Code de confirmation (si applicable)</label>
-                            <input type="text" name="code_confirmation" class="w-full rounded-lg border-gray-300">
-                        </div>
+                        
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Commentaire</label>
-                            <textarea name="commentaire" rows="3" class="w-full rounded-lg border-gray-300"></textarea>
+                            <textarea name="commentaire_livraison" rows="3" class="w-full rounded-lg border-gray-300"></textarea>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Photo de livraison</label>
@@ -448,26 +455,32 @@
 
 <!-- Navigation Options Modal -->
 <div id="navigationModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
-  <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-lg shadow-xl max-w-md w-full">
-      <div class="p-6">
-        <h3 class="text-lg font-medium text-gray-900 mb-4">Ouvrir la navigation</h3>
-        <div id="leafletMap" style="height: 400px; width: 100%;"></div>
-        <div class="mt-6 flex justify-end">
-          <button onclick="closeModal('navigationModal')" class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg">
-            Fermer
-          </button>
+    <div class="flex items-center justify-center min-h-screen p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full">
+            <div class="p-6">
+                <h3 class="text-lg font-medium text-gray-900 mb-4">Navigation</h3>
+                <div id="leafletMap" style="height: 400px; width: 100%;"></div>
+                <div class="mt-4">
+                    <h4 class="text-sm font-medium text-gray-700">Instructions de l'itinéraire</h4>
+                    <div id="routeInstructions" class="text-sm text-gray-600 max-h-40 overflow-y-auto"></div>
+                </div>
+                <div class="mt-6 flex justify-end">
+                    <button onclick="closeModal('navigationModal')" class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg">
+                        Fermer
+                    </button>
+                </div>
+            </div>
         </div>
-      </div>
     </div>
-  </div>
 </div>
 
 @endsection
 
 @section('scripts')
-section('scripts')
-@section('scripts')
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
 <script>
 // Global variables
 let currentDeliveryId = {{ $livraisonActuelle ? $livraisonActuelle->id : 'null' }};
@@ -548,23 +561,60 @@ function updateMapPosition(lat, lng) {
 // Open navigation modal
 function openNavigation(deliveryId) {
     fetch(`/livreur/livraisons/${deliveryId}/navigation`)
-        .then(res => res.json())
+        .then(res => {
+            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+            return res.json();
+        })
         .then(data => {
-            if (data.success) {
-                document.getElementById('googleMapsLink').href = data.navigation_urls.google_maps;
-                document.getElementById('wazeLink').href = data.navigation_urls.waze;
-                document.getElementById('appleMapsLink').href = data.navigation_urls.apple_maps;
-                openModal('navigationModal');
+            if (!data.success) throw new Error(data.message || 'Erreur navigation');
+            const routeData = data.route_data;
+            console.log('Route data:', routeData);
+
+            const map = L.map('leafletMap').setView([routeData.current_position.lat, routeData.current_position.lng], 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            L.marker([routeData.start_point.lat, routeData.start_point.lng]).addTo(map)
+                .bindPopup('Point de départ: ' + routeData.start_address)
+                .openPopup();
+            L.marker([routeData.end_point.lat, routeData.end_point.lng]).addTo(map)
+                .bindPopup('Point d\'arrivée: ' + routeData.end_address)
+                .openPopup();
+            L.marker([routeData.current_position.lat, routeData.current_position.lng]).addTo(map)
+                .bindPopup('Position actuelle')
+                .openPopup();
+
+            if (routeData.polyline && routeData.polyline.coordinates) {
+                const polyline = L.polyline(routeData.polyline.coordinates.map(coord => [coord[1], coord[0]]), {
+                    color: 'blue',
+                    weight: 4,
+                    opacity: 0.7
+                }).addTo(map);
+                map.fitBounds(polyline.getBounds());
+                console.log('Polyline added:', routeData.polyline.coordinates);
             } else {
-                alert(data.message || 'Erreur navigation');
+                console.warn('No valid polyline data:', routeData.polyline);
+                alert('Aucune donnée d\'itinéraire disponible.');
             }
+
+            const instructionsDiv = document.getElementById('routeInstructions');
+            if (routeData.steps && routeData.steps.length > 0) {
+                instructionsDiv.innerHTML = routeData.steps.map(step => `<p>${step.instruction}</p>`).join('');
+            } else {
+                instructionsDiv.innerHTML = '<p>Aucune instruction disponible.</p>';
+                console.warn('No steps data:', routeData.steps);
+            }
+
+            openModal('navigationModal');
         })
         .catch(err => {
-            console.error('Erreur navigation:', err);
-            alert('Erreur de navigation');
+            console.error('Navigation error:', err);
+            alert('Erreur de navigation: ' + err.message);
         });
 }
-
 // Start delivery
 function startDelivery(deliveryId) {
     if (!navigator.geolocation) return alert('Activez la géolocalisation');

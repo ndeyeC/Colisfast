@@ -14,9 +14,6 @@ use Illuminate\Support\Facades\Http;
 
 class LivraisonEnCoursController extends Controller
 {
-    /**
-     * Afficher la page des livraisons en cours
-     */
     public function index()
     {
         $livreurId = Auth::id();
@@ -33,7 +30,6 @@ class LivraisonEnCoursController extends Controller
         
         $statistiques = $this->getStatistiquesJour($livreurId);
 
-        // Calculer le pourcentage de progression
         $progressPercentage = 0;
         if ($livraisonActuelle && $livraisonActuelle->deliveryRoute) {
             $progressPercentage = $this->calculateProgress($livraisonActuelle->deliveryRoute);
@@ -47,9 +43,6 @@ class LivraisonEnCoursController extends Controller
         ));
     }
 
-    /**
-     * API pour récupérer les livraisons en cours (pour AJAX)
-     */
     public function apiLivraisonsEnCours()
     {
         $livreurId = Auth::id();
@@ -79,123 +72,146 @@ class LivraisonEnCoursController extends Controller
         ]);
     }
 
-    /**
-     * Démarrer une livraison
-     */
     public function demarrerLivraison(Request $request, $commandeId)
     {
-        $request->validate([
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric'
-        ]);
+        try {
+            $commande = Commnande::findOrFail($commandeId);
 
-        $commande = Commnande::where('id', $commandeId)
-            ->where('driver_id', Auth::id())
-            ->where('status', 'acceptee')
-            ->firstOrFail();
+            if (Auth::user()->role !== 'livreur') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Seul un livreur peut démarrer une livraison.'
+                ], 403);
+            }
 
-        // Vérifier qu'il n'y a pas déjà une livraison en cours
-        $livraisonEnCours = Commnande::where('driver_id', Auth::id())
-            ->where('status', 'en_cours')
-            ->exists();
+            if (is_null($commande->lat_arrivee) || is_null($commande->lng_arrivee)) {
+                Log::warning("Missing destination coordinates for commande ID: {$commandeId}", [
+                    'lat_arrivee' => $commande->lat_arrivee,
+                    'lng_arrivee' => $commande->lng_arrivee
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Les coordonnées de destination sont manquantes.'
+                ], 400);
+            }
 
-        if ($livraisonEnCours) {
+            $latitude = $request->input('latitude');
+            $longitude = $request->input('longitude');
+
+            if (is_null($latitude) || is_null($longitude)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Les coordonnées actuelles du livreur sont requises.'
+                ], 400);
+            }
+
+            if ($commande->status === 'en_attente' || $commande->status === 'acceptee') {
+                $commande->update([
+                    'status' => 'en_cours',
+                    'driver_id' => Auth::id(),
+                    'date_debut_livraison' => now()
+                ]);
+
+                $deliveryRoute = DeliveryRoute::create([
+                    'commnande_id' => $commandeId,
+                    'livreur_id' => Auth::id(),
+                    'driver_id' => Auth::id(),
+                    'start_point' => json_encode(['lat' => (float) $commande->lat_depart, 'lng' => (float) $commande->lng_depart]),
+                    'end_point' => json_encode(['lat' => (float) $commande->lat_arrivee, 'lng' => (float) $commande->lng_arrivee]),
+                    'current_position' => json_encode(['lat' => (float) $latitude, 'lng' => (float) $longitude]),
+                    'distance_km' => 0,
+                    'duration_minutes' => 0,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+
+                Log::info("Livraison démarrée pour la commande ID: {$commandeId}", [
+                    'livreur_id' => Auth::id(),
+                    'start_point' => ['lat' => $commande->lat_depart, 'lng' => $commande->lng_depart],
+                    'end_point' => ['lat' => $commande->lat_arrivee, 'lng' => $commande->lng_arrivee],
+                    'current_position' => ['lat' => $latitude, 'lng' => $longitude]
+                ]);
+            } elseif ($commande->status === 'en_cours' && $commande->driver_id === Auth::id()) {
+                $deliveryRoute = DeliveryRoute::where('commnande_id', $commandeId)->first();
+
+                if (!$deliveryRoute) {
+                    Log::warning("No DeliveryRoute found for commande ID: {$commandeId}");
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Aucun itinéraire de livraison trouvé pour cette commande.'
+                    ], 404);
+                }
+
+                $deliveryRoute->update([
+                    'current_position' => json_encode(['lat' => (float) $latitude, 'lng' => (float) $longitude]),
+                    'updated_at' => now()
+                ]);
+
+                Log::info("Position mise à jour pour la livraison en cours, commande ID: {$commandeId}", [
+                    'livreur_id' => Auth::id(),
+                    'current_position' => ['lat' => $latitude, 'lng' => $longitude]
+                ]);
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'La commande doit être au statut "en_attente", "acceptee" ou en cours par le même livreur.'
+                ], 400);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Livraison démarrée ou position mise à jour avec succès.',
+                'data' => [
+                    'commande_id' => $commande->id,
+                    'status' => $commande->status,
+                    'current_position' => ['lat' => $latitude, 'lng' => $longitude]
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Erreur lors du démarrage ou de la mise à jour de la livraison pour la commande ID: {$commandeId}", [
+                'error' => $e->getMessage(),
+                'request_data' => $request->all()
+            ]);
             return response()->json([
                 'success' => false,
-                'message' => 'Vous avez déjà une livraison en cours. Terminez-la avant d\'en commencer une nouvelle.'
-            ], 400);
+                'message' => 'Erreur lors du traitement de la livraison : ' . $e->getMessage()
+            ], 500);
         }
-
-        // Mettre à jour le statut de la commande
-        $commande->status = 'en_cours';
-        $commande->date_debut_livraison = now();
-        $commande->save();
-
-        // Créer ou mettre à jour la route de livraison
-        $route = DeliveryRoute::updateOrCreate(
-            ['commande_id' => $commandeId],
-            [
-                'driver_id' => Auth::id(),
-                'start_point' => [
-                    'lat' => $request->latitude,
-                    'lng' => $request->longitude
-                ],
-                'end_point' => [
-                    'lat' => $commande->lat_arrivee,
-                    'lng' => $commande->lng_arrivee
-                ],
-                'started_at' => now(),
-                'current_position' => [
-                    'lat' => $request->latitude,
-                    'lng' => $request->longitude
-                ]
-            ]
-        );
-
-        $this->calculateRoute($route);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Livraison démarrée avec succès!',
-            'commande' => $this->formatLivraisonData($commande->load(['user', 'deliveryRoute']))
-        ]);
     }
 
-    /**
-     * Mettre à jour la position du livreur
-     */
     public function updatePosition(Request $request, $commandeId)
     {
-        $request->validate([
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric'
-        ]);
-
         $commande = Commnande::where('id', $commandeId)
             ->where('driver_id', Auth::id())
             ->where('status', 'en_cours')
+            ->with('deliveryRoute')
             ->firstOrFail();
 
-        DeliveryRoute::where('commande_id', $commandeId)
-            ->update([
-                'current_position' => [
-                    'lat' => $request->latitude,
-                    'lng' => $request->longitude
-                ],
-                'updated_at' => now()
-            ]);
+        $deliveryRoute = $commande->deliveryRoute;
+        $currentPosition = $deliveryRoute->current_position;
 
-        $route = $commande->deliveryRoute;
-        $distanceRestante = null;
-        $tempsEstime = null;
-
-        if ($route && $route->end_point) {
-            $distanceRestante = $this->calculateDistance(
-                $request->latitude,
-                $request->longitude,
-                $route->end_point['lat'],
-                $route->end_point['lng']
-            );
-            
-            $tempsEstime = round(($distanceRestante / 30) * 60); // en minutes
+        if (is_string($currentPosition)) {
+            $currentPosition = json_decode($currentPosition, true);
         }
 
-        return response()->json([
-            'success' => true,
-            'distance_restante' => $distanceRestante,
-            'temps_estime' => $tempsEstime,
-            'position_updated' => true
-        ]);
+        if (!is_array($currentPosition) || !isset($currentPosition['lat']) || !isset($currentPosition['lng'])) {
+            Log::warning("Format invalide pour current_position pour l'ID commande : {$commandeId}", ['current_position' => $currentPosition]);
+            return response()->json(['success' => false, 'message' => 'Position invalide.'], 400);
+        }
+
+        $lat = $currentPosition['lat'];
+        $lng = $currentPosition['lng'];
+
+        $deliveryRoute->current_position = json_encode(['lat' => $lat, 'lng' => $lng]);
+        $deliveryRoute->save();
+
+        return response()->json(['success' => true, 'message' => 'Position mise à jour.']);
     }
 
-    /**
-     * Marquer une livraison comme livrée
-     */
     public function marquerLivree(Request $request, $commandeId)
     {
         $request->validate([
-            'code_confirmation' => 'sometimes|string|max:10',
-            'commentaire' => 'nullable|string|max:500',
+            'commentaire_livraison' => 'nullable|string|max:500',
             'photo_livraison' => 'sometimes|image|max:2048',
             'latitude' => 'required|numeric',
             'longitude' => 'required|numeric'
@@ -206,7 +222,6 @@ class LivraisonEnCoursController extends Controller
             ->where('status', 'en_cours')
             ->firstOrFail();
 
-        // Ajouter la position actuelle si pas fournie
         if (!$request->has('latitude') || !$request->has('longitude')) {
             return response()->json([
                 'success' => false,
@@ -214,7 +229,6 @@ class LivraisonEnCoursController extends Controller
             ], 400);
         }
 
-        // Gérer l'upload de photo si présente
         $photoPath = null;
         if ($request->hasFile('photo_livraison')) {
             $photoPath = $request->file('photo_livraison')->store('livraisons/' . date('Y/m'), 'public');
@@ -229,18 +243,14 @@ class LivraisonEnCoursController extends Controller
             'lng_livraison' => $request->longitude
         ]);
 
-        DeliveryRoute::where('commande_id', $commandeId)
+        DeliveryRoute::where('commnande_id', $commandeId)
             ->update([
                 'completed_at' => now(),
-                'final_position' => [
-                    'lat' => $request->latitude,
-                    'lng' => $request->longitude
-                ]
+                'final_position' => json_encode(['lat' => $request->latitude, 'lng' => $request->longitude])
             ]);
 
-        // Log de l'activité
         Log::info("Livraison terminée", [
-            'commande_id' => $commandeId,
+            'commnande_id' => $commandeId,
             'driver_id' => Auth::id(),
             'completed_at' => now()
         ]);
@@ -252,161 +262,72 @@ class LivraisonEnCoursController extends Controller
         ]);
     }
 
-    /**
-     * Signaler un problème
-     */
-//  public function signalerProbleme(Request $request, $commandeId)
-// {
-//     $request->validate([
-//         'type_probleme' => 'required|string|in:client_absent,adresse_incorrecte,colis_endommage,autre',
-//         'description' => 'required|string|max:500',
-//         'photo' => 'sometimes|image|max:2048'
-//     ]);
-
-//     // Récupérez l'ID de l'utilisateur connecté
-//     $driverId = Auth::id();
-    
-//     // Journalisation pour débogage
-//     \Log::info('Tentative de signalement', [
-//         'commande_id' => $commandeId,
-//         'driver_id' => $driverId,
-//         'time' => now()
-//     ]);
-
-//     // Vérification en 3 étapes avec messages d'erreur spécifiques
-//     $commande = Commnande::where('id', $commandeId)->first();
-
-//     if (!$commande) {
-//         return response()->json([
-//             'success' => false,
-//             'message' => 'Commande introuvable',
-//             'debug' => [
-//                 'commande_exists' => false,
-//                 'driver_id' => $driverId
-//             ]
-//         ], 404);
-//     }
-
-//     if ($commande->driver_id != $driverId) {
-//         return response()->json([
-//             'success' => false,
-//             'message' => 'Cette commande ne vous est pas attribuée',
-//             'debug' => [
-//                 'expected_driver' => $driverId,
-//                 'actual_driver' => $commande->driver_id
-//             ]
-//         ], 403);
-//     }
-
-//     if (!in_array($commande->status, ['en_cours', 'acceptee'])) {
-//         return response()->json([
-//             'success' => false,
-//             'message' => 'La commande n\'est pas dans un état permettant de signaler un problème',
-//             'current_status' => $commande->status
-//         ], 400);
-//     }
-
-//     // Traitement du signalement
-//     $photoPath = $request->hasFile('photo') 
-//         ? $request->file('photo')->store('problemes/' . date('Y/m'), 'public')
-//         : null;
-
-//     $probleme = [
-//         'commande_id' => $commandeId,
-//         'driver_id' => $driverId,
-//         'type_probleme' => $request->type_probleme,
-//         'description' => $request->description,
-//         'photo' => $photoPath,
-//         'date_signalement' => now(),
-//         'status' => 'en_attente'
-//     ];
-
-//     $commande->update([
-//         'probleme_signale' => json_encode($probleme),
-//         'status' => 'probleme_signale'
-//     ]);
-
-//     return response()->json([
-//         'success' => true,
-//         'message' => 'Problème signalé avec succès!',
-//         'data' => [
-//             'problem_id' => $commandeId,
-//             'new_status' => 'probleme_signale',
-//             'photo_uploaded' => !is_null($photoPath)
-//         ]
-//     ]);
-// }
-
-public function signalerProbleme(Request $request, $commandeId)
-{
-    $validated = $request->validate([
-        'type_probleme' => 'required|string|in:client_absent,adresse_incorrecte,colis_endommage,autre',
-        'description' => 'required|string|max:500',
-        'photo' => 'sometimes|image|max:2048'
-    ]);
-
-    DB::beginTransaction();
-    try {
-        $commande = Commnande::where('id', $commandeId)
-                   ->where('driver_id', Auth::id())
-                   ->whereIn('status', ['en_cours', 'acceptee'])
-                   ->lockForUpdate() // Verrouille la ligne
-                   ->firstOrFail();
-
-        $photoPath = $request->hasFile('photo') 
-            ? $request->file('photo')->store('problemes/'.date('Y/m'), 'public')
-            : null;
-
-        $problemeData = [
-            'type' => $validated['type_probleme'],
-            'description' => $validated['description'],
-            'photo' => $photoPath,
-            'date' => now()->toISOString(),
-            'status' => 'en_attente',
-            'ip' => $request->ip()
-        ];
-
-        $commande->forceFill([
-            'probleme_signale' => $problemeData, 
-            'status' => 'probleme_signale'
-        ])->save();
-
-        // VÉRIFICATION IMMÉDIATE
-        $savedData = $commande->fresh();
-        if (empty($savedData->probleme_signale)) {
-            throw new \Exception("Échec de persistance des données");
-        }
-
-        DB::commit();
-
-     return response()->json([
-    'success' => true,
-    'saved_data' => $savedData->probleme_signale,
-    'alert' => [
-        'title' => 'Signalement enregistré',
-        'message' => 'Le problème a été signalé avec succès',
-        'type' => 'success'
-    ]
-]);
-    } catch (\Exception $e) {
-        DB::rollBack();
-        \Log::error("Échec signalement", [
-            'error' => $e->getMessage(),
-            'commande' => $commandeId,
-            'data' => $request->all()
+    public function signalerProbleme(Request $request, $commandeId)
+    {
+        $validated = $request->validate([
+            'type_probleme' => 'required|string|in:client_absent,adresse_incorrecte,colis_endommage,autre',
+            'description' => 'required|string|max:500',
+            'photo' => 'sometimes|image|max:2048'
         ]);
-        
-        return response()->json([
-            'success' => false,
-            'technical' => config('app.debug') ? $e->getMessage() : null,
-            'message' => "Échec de l'enregistrement"
-        ], 500);
-    }
-}
 
-    /**
-     * Annuler une livraison
-     */
+        DB::beginTransaction();
+        try {
+            $commande = Commnande::where('id', $commandeId)
+                       ->where('driver_id', Auth::id())
+                       ->whereIn('status', ['en_cours', 'acceptee'])
+                       ->lockForUpdate()
+                       ->firstOrFail();
+
+            $photoPath = $request->hasFile('photo') 
+                ? $request->file('photo')->store('problemes/'.date('Y/m'), 'public')
+                : null;
+
+            $problemeData = [
+                'type' => $validated['type_probleme'],
+                'description' => $validated['description'],
+                'photo' => $photoPath,
+                'date' => now()->toISOString(),
+                'status' => 'en_attente',
+                'ip' => $request->ip()
+            ];
+
+            $commande->forceFill([
+                'probleme_signale' => $problemeData, 
+                'status' => 'probleme_signale'
+            ])->save();
+
+            $savedData = $commande->fresh();
+            if (empty($savedData->probleme_signale)) {
+                throw new \Exception("Échec de persistance des données");
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'saved_data' => $savedData->probleme_signale,
+                'alert' => [
+                    'title' => 'Signalement enregistré',
+                    'message' => 'Le problème a été signalé avec succès',
+                    'type' => 'success'
+                ]
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error("Échec signalement", [
+                'error' => $e->getMessage(),
+                'commande' => $commandeId,
+                'data' => $request->all()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'technical' => config('app.debug') ? $e->getMessage() : null,
+                'message' => "Échec de l'enregistrement"
+            ], 500);
+        }
+    }
+
     public function annulerLivraison(Request $request, $commandeId)
     {
         $request->validate([
@@ -425,7 +346,7 @@ public function signalerProbleme(Request $request, $commandeId)
             'date_annulation' => now()
         ]);
 
-        DeliveryRoute::where('commande_id', $commandeId)->delete();
+        DeliveryRoute::where('commnande_id', $commandeId)->delete();
 
         return response()->json([
             'success' => true,
@@ -433,9 +354,6 @@ public function signalerProbleme(Request $request, $commandeId)
         ]);
     }
 
-    /**
-     * Ouvrir la navigation
-     */
     public function ouvrirNavigation($commandeId)
     {
         $commande = Commnande::where('id', $commandeId)
@@ -444,64 +362,105 @@ public function signalerProbleme(Request $request, $commandeId)
             ->with('deliveryRoute')
             ->firstOrFail();
 
+        Log::info("Commande trouvée pour la navigation", ['commande_id' => $commandeId, 'commande' => $commande->toArray()]);
+
         $route = $commande->deliveryRoute;
-        
         if (!$route) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Route non trouvée'
-            ], 404);
+            return response()->json(['success' => false, 'message' => 'Aucune route associée.'], 404);
         }
 
-        // URLs pour différentes applications de navigation
-        $navigationUrls = [
-            'google_maps' => "https://www.google.com/maps/dir/{$route->start_point['lat']},{$route->start_point['lng']}/{$route->end_point['lat']},{$route->end_point['lng']}",
-            'waze' => "https://waze.com/ul?ll={$route->end_point['lat']},{$route->end_point['lng']}&navigate=yes",
-            'apple_maps' => "http://maps.apple.com/?daddr={$route->end_point['lat']},{$route->end_point['lng']}&dirflg=d"
+        $startPoint = $route->start_point;
+        $endPoint = $route->end_point;
+        $currentPosition = $route->current_position;
+
+        $startPoint = is_string($startPoint) ? json_decode($startPoint, true) : $startPoint;
+        $endPoint = is_string($endPoint) ? json_decode($endPoint, true) : $endPoint;
+        $currentPosition = is_string($currentPosition) ? json_decode($currentPosition, true) : $currentPosition;
+
+        if (!$startPoint || !isset($startPoint['lat']) || !isset($startPoint['lng']) ||
+            !$endPoint || !isset($endPoint['lat']) || !isset($endPoint['lng']) ||
+            !$currentPosition || !isset($currentPosition['lat']) || !isset($currentPosition['lng'])) {
+            Log::warning("Coordonnées invalides pour l'ID commande : {$commandeId}");
+            return response()->json(['success' => false, 'message' => 'Coordonnées invalides.'], 400);
+        }
+
+        $routeData = [
+            'start_point' => $startPoint,
+            'end_point' => $endPoint,
+            'current_position' => $currentPosition,
+            'polyline' => $route->polyline,
+            'steps' => $route->steps,
+            'distance_km' => $route->distance_km,
+            'duration_minutes' => $route->duration_minutes,
+            'start_address' => $commande->adresse_depart,
+            'end_address' => $commande->adresse_arrivee
         ];
 
-        return response()->json([
-            'success' => true,
-            'navigation_urls' => $navigationUrls,
-            'route_data' => $route
-        ]);
+        return response()->json(['success' => true, 'route_data' => $routeData]);
     }
 
-    /**
-     * Calculer l'itinéraire avec OSRM
-     */
     private function calculateRoute(DeliveryRoute $route)
     {
         try {
-            $start = $route->start_point['lng'] . ',' . $route->start_point['lat'];
-            $end = $route->end_point['lng'] . ',' . $route->end_point['lat'];
+            $url = "https://api.openrouteservice.org/v2/directions/driving-car/geojson";
+            $start = [$route->start_point['lng'], $route->start_point['lat']];
+            $end = [$route->end_point['lng'], $route->end_point['lat']];
 
-            $response = Http::timeout(10)->get("http://router.project-osrm.org/route/v1/driving/{$start};{$end}", [
-                'overview' => 'full',
-                'steps' => 'true',
-                'geometries' => 'geojson'
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . env('OPENROUTESERVICE_API_KEY'),
+                'Content-Type' => 'application/json'
+            ])->post($url, [
+                'coordinates' => [$start, $end],
+                'instructions' => true
             ]);
 
             if ($response->successful()) {
-                $data = $response->json()['routes'][0];
-                $route->update([
-                    'polyline' => $data['geometry'],
-                    'steps' => $data['legs'][0]['steps'] ?? [],
-                    'distance_km' => round($data['distance'] / 1000, 2),
-                    'duration_minutes' => round($data['duration'] / 60)
+                $data = $response->json();
+                if (isset($data['features'][0])) {
+                    $feature = $data['features'][0];
+                    $route->update([
+                        'polyline' => $feature['geometry'],
+                        'steps' => array_map(function ($step) {
+                            return [
+                                'instruction' => $step['instruction'] ?? 'Pas d\'instruction',
+                                'distance' => $step['distance'] ?? 0,
+                                'duration' => $step['duration'] ?? 0
+                            ];
+                        }, $feature['properties']['segments'][0]['steps'] ?? []),
+                        'distance_km' => round($feature['properties']['summary']['distance'] / 1000, 2),
+                        'duration_minutes' => round($feature['properties']['summary']['duration'] / 60)
+                    ]);
+                    Log::info("Route calculated successfully for commande ID: {$route->commnande_id}", [
+                        'polyline' => $feature['geometry'],
+                        'steps_count' => count($feature['properties']['segments'][0]['steps'] ?? [])
+                    ]);
+                    return true;
+                } else {
+                    Log::warning("No features in OpenRouteService response for commande ID: {$route->commnande_id}", [
+                        'response' => $data
+                    ]);
+                    return false;
+                }
+            } else {
+                Log::error("OpenRouteService request failed for commande ID: {$route->commnande_id}", [
+                    'status' => $response->status(),
+                    'response' => $response->json()
                 ]);
+                return false;
             }
         } catch (\Exception $e) {
-            Log::error('Erreur calcul route OSRM: ' . $e->getMessage());
+            Log::error("OpenRouteService error for commande ID: {$route->commnande_id}", [
+                'error' => $e->getMessage(),
+                'start' => $start,
+                'end' => $end
+            ]);
+            return false;
         }
     }
 
-    /**
-     * Calculer la distance entre deux points (en km)
-     */
-    private function calculateDistance($lat1, $lng1, $lat2, $lng2)
+    protected function calculateDistance($lat1, $lng1, $lat2, $lng2)
     {
-        $earthRadius = 6371; // Rayon de la Terre en km
+        $earthRadius = 6371;
 
         $dLat = deg2rad($lat2 - $lat1);
         $dLng = deg2rad($lng2 - $lng1);
@@ -516,9 +475,6 @@ public function signalerProbleme(Request $request, $commandeId)
         return round($distance, 2);
     }
 
-    /**
-     * Formater les données de livraison pour l'API
-     */
     private function formatLivraisonData($commande)
     {
         $route = $commande->deliveryRoute;
@@ -551,27 +507,39 @@ public function signalerProbleme(Request $request, $commandeId)
         ];
     }
 
-    /**
-     * Calculer le pourcentage de progression
-     */
     private function calculateProgress($route)
     {
         if (!$route || !$route->current_position || !$route->start_point || !$route->end_point) {
             return 0;
         }
 
+        $startPoint = is_string($route->start_point) ? json_decode($route->start_point, true) : $route->start_point;
+        $endPoint = is_string($route->end_point) ? json_decode($route->end_point, true) : $route->end_point;
+        $currentPosition = is_string($route->current_position) ? json_decode($route->current_position, true) : $route->current_position;
+
+        if (!is_array($startPoint) || !isset($startPoint['lat']) || !isset($startPoint['lng']) ||
+            !is_array($endPoint) || !isset($endPoint['lat']) || !isset($endPoint['lng']) ||
+            !is_array($currentPosition) || !isset($currentPosition['lat']) || !isset($currentPosition['lng'])) {
+            Log::warning('Invalid coordinate data in calculateProgress', [
+                'start_point' => $startPoint,
+                'end_point' => $endPoint,
+                'current_position' => $currentPosition
+            ]);
+            return 0;
+        }
+
         $totalDistance = $this->calculateDistance(
-            $route->start_point['lat'],
-            $route->start_point['lng'],
-            $route->end_point['lat'],
-            $route->end_point['lng']
+            $startPoint['lat'],
+            $startPoint['lng'],
+            $endPoint['lat'],
+            $endPoint['lng']
         );
 
         $distanceRestante = $this->calculateDistance(
-            $route->current_position['lat'],
-            $route->current_position['lng'],
-            $route->end_point['lat'],
-            $route->end_point['lng']
+            $currentPosition['lat'],
+            $currentPosition['lng'],
+            $endPoint['lat'],
+            $endPoint['lng']
         );
 
         if ($totalDistance == 0) return 100;
@@ -580,9 +548,6 @@ public function signalerProbleme(Request $request, $commandeId)
         return max(0, min(100, round($progress)));
     }
 
-    /**
-     * Récupérer les statistiques du jour
-     */
     private function getStatistiquesJour($livreurId)
     {
         return [
@@ -600,5 +565,64 @@ public function signalerProbleme(Request $request, $commandeId)
                 ->where('status', 'acceptee')
                 ->count()
         ];
+    }
+
+    public function getDeliveryStatus($commandeId)
+    {
+        $commande = Commnande::where('id', $commandeId)
+            ->where('driver_id', Auth::id())
+            ->where('status', 'en_cours')
+            ->with('deliveryRoute')
+            ->firstOrFail();
+
+        Log::info("Commande trouvée pour le statut", ['commande_id' => $commandeId, 'commande' => $commande->toArray()]);
+
+        $deliveryRoute = $commande->deliveryRoute;
+        if (!$deliveryRoute) {
+            return response()->json(['success' => false, 'message' => 'Aucune route associée.'], 404);
+        }
+
+        $currentPosition = $deliveryRoute->current_position;
+        $startPoint = $deliveryRoute->start_point;
+        $endPoint = $deliveryRoute->end_point;
+
+        Log::info("Raw data before decoding", [
+            'current_position' => $currentPosition,
+            'start_point' => $startPoint,
+            'end_point' => $endPoint
+        ]);
+
+        $currentPosition = is_string($currentPosition) ? json_decode($currentPosition, true) : $currentPosition;
+        $startPoint = is_string($startPoint) ? json_decode($startPoint, true) : $startPoint;
+        $endPoint = is_string($endPoint) ? json_decode($endPoint, true) : $endPoint;
+
+        Log::info("Decoded data", [
+            'current_position' => $currentPosition,
+            'start_point' => $startPoint,
+            'end_point' => $endPoint
+        ]);
+
+        if (!is_array($currentPosition) || !isset($currentPosition['lat']) || !isset($currentPosition['lng']) ||
+            !is_array($startPoint) || !isset($startPoint['lat']) || !isset($startPoint['lng']) ||
+            !is_array($endPoint) || !isset($endPoint['lat']) || !isset($endPoint['lng'])) {
+            Log::warning("Coordonnées invalides pour l'ID commande : {$commandeId}", [
+                'current_position' => $currentPosition,
+                'start_point' => $startPoint,
+                'end_point' => $endPoint
+            ]);
+            return response()->json(['success' => false, 'message' => 'Coordonnées invalides.'], 400);
+        }
+
+        $statusData = [
+            'current_position' => $currentPosition,
+            'start_point' => $startPoint,
+            'end_point' => $endPoint,
+            'distance_km' => $deliveryRoute->distance_km,
+            'duration_minutes' => $deliveryRoute->duration_minutes,
+        ];
+
+        Log::info("Status data prepared", ['status_data' => $statusData]);
+
+        return response()->json(['success' => true, 'data' => $statusData]);
     }
 }

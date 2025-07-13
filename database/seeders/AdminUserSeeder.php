@@ -19,7 +19,7 @@ class AdminUserSeeder extends Seeder
             [
                 'name' => 'Colisfast',
                 'email' => 'colisfast@gmail.com',
-                'password' => Hash::make('passer'), // change ce mot de passe après !
+                'password' => Hash::make('passer'), // change mot de passe après 
                 'role' => 'admin',
 
                 ]

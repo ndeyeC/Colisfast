@@ -8,20 +8,23 @@ use Carbon\Carbon;
 
 class RevenuLivreurController extends Controller
 {
+    /**
+     * Statistiques générales du livreur (API JSON)
+     */
     public function getStats($livreurId)
     {
         $revenuMois = Commnande::where('driver_id', $livreurId)
             ->where('status', Commnande::STATUT_LIVREE)
-            ->whereMonth('updated_at', Carbon::now()->month)
+            ->whereMonth('updated_at', now()->month)
             ->sum('revenu_livreur');
 
         $revenuTotal = Commnande::where('driver_id', $livreurId)
             ->where('status', Commnande::STATUT_LIVREE)
-            ->sum('revenu_livreur');
+            ->sum('revenu_livraison');
 
         $livraisonsMois = Commnande::where('driver_id', $livreurId)
             ->where('status', Commnande::STATUT_LIVREE)
-            ->whereMonth('updated_at', Carbon::now()->month)
+            ->whereMonth('updated_at', now()->month)
             ->count();
 
         $moyenne = $livraisonsMois > 0 ? $revenuMois / $livraisonsMois : 0;
@@ -34,12 +37,14 @@ class RevenuLivreurController extends Controller
         ]);
     }
 
-    
+    /**
+     * Historique des paiements du livreur (API JSON)
+     */
     public function getHistoriquePaiements($livreurId)
     {
         $paiements = Commnande::where('driver_id', $livreurId)
             ->where('status', Commnande::STATUT_LIVREE)
-            ->whereNotNull('revenu_livreur')
+            ->whereNotNull('revenu_livraison')
             ->orderBy('updated_at', 'desc')
             ->get()
             ->map(function ($commande) {
@@ -47,7 +52,7 @@ class RevenuLivreurController extends Controller
                     'reference' => 'CMD-' . $commande->id,
                     'date' => $commande->updated_at->format('d/m/Y'),
                     'description' => 'Livraison #' . $commande->id,
-                    'montant' => $commande->revenu_livreur,
+                    'montant' => $commande->revenu_livraison,
                     'statut' => $commande->statut_paiement_livreur ?? 'en_attente'
                 ];
             });
@@ -55,26 +60,29 @@ class RevenuLivreurController extends Controller
         return response()->json($paiements);
     }
 
+    /**
+     * Données de revenus journaliers pour un graphique (API JSON)
+     */
     public function getGraphData($livreurId)
     {
         $revenusJournaliers = [];
         $dates = [];
-        
+
         for ($i = 30; $i >= 0; $i--) {
             $date = Carbon::now()->subDays($i);
             $dates[] = $date->format('d M');
-            
+
             $total = Commnande::where('driver_id', $livreurId)
                 ->where('status', Commnande::STATUT_LIVREE)
                 ->whereDate('updated_at', $date)
-                ->sum('revenu_livreur');
-                
-            $revenusJournaliers[] = $total;
+                ->sum('revenu_livraison');
+
+            $revenusJournaliers[] = round($total, 2);
         }
 
         $typesLivraison = Commnande::where('driver_id', $livreurId)
             ->where('status', Commnande::STATUT_LIVREE)
-            ->selectRaw('type_livraison, sum(revenu_livreur) as total')
+            ->selectRaw('type_livraison, sum(revenu_livraison) as total')
             ->groupBy('type_livraison')
             ->get()
             ->pluck('total', 'type_livraison');
@@ -86,12 +94,14 @@ class RevenuLivreurController extends Controller
         ]);
     }
 
+    /**
+     * Performances du livreur (API JSON)
+     */
     public function getPerformances($livreurId)
     {
-        // Calcul des bonus
         $livraisonsMois = Commnande::where('driver_id', $livreurId)
             ->where('status', Commnande::STATUT_LIVREE)
-            ->whereMonth('updated_at', Carbon::now()->month)
+            ->whereMonth('updated_at', now()->month)
             ->count();
 
         $noteMoyenne = Commnande::where('driver_id', $livreurId)
@@ -101,7 +111,7 @@ class RevenuLivreurController extends Controller
         $livraisonsExpress = Commnande::where('driver_id', $livreurId)
             ->where('status', Commnande::STATUT_LIVREE)
             ->where('type_livraison', 'express')
-            ->whereMonth('updated_at', Carbon::now()->month)
+            ->whereMonth('updated_at', now()->month)
             ->count();
 
         return response()->json([
@@ -127,7 +137,45 @@ class RevenuLivreurController extends Controller
             ],
             'solde_portefeuille' => Commnande::where('driver_id', $livreurId)
                 ->where('statut_paiement_livreur', 'en_attente')
-                ->sum('revenu_livreur')
+                ->sum('revenu_livraison')
+        ]);
+    }
+
+    /**
+     * Affichage de la page Blade avec les revenus (vue web)
+     */
+    public function revenusView()
+    {
+        $livreurId = auth()->id();
+
+        $revenuMois = Commnande::where('driver_id', $livreurId)
+            ->where('status', Commnande::STATUT_LIVREE)
+            ->whereMonth('updated_at', now()->month)
+            ->sum('revenu_livraison');
+
+        $revenuTotal = Commnande::where('driver_id', $livreurId)
+            ->where('status', Commnande::STATUT_LIVREE)
+            ->sum('revenu_livraison');
+
+        $livraisonsMois = Commnande::where('driver_id', $livreurId)
+            ->where('status', Commnande::STATUT_LIVREE)
+            ->whereMonth('updated_at', now()->month)
+            ->count();
+
+        $moyenne = $livraisonsMois > 0 ? $revenuMois / $livraisonsMois : 0;
+
+        $paiements = Commnande::where('driver_id', $livreurId)
+            ->where('status', Commnande::STATUT_LIVREE)
+            ->whereNotNull('revenu_livraison')
+            ->orderBy('updated_at', 'desc')
+            ->get();
+
+        return view('livreur.revenus', [
+            'revenuMois' => round($revenuMois, 2),
+            'revenuTotal' => round($revenuTotal, 2),
+            'livraisonsMois' => $livraisonsMois,
+            'moyenne' => round($moyenne, 2),
+            'paiements' => $paiements
         ]);
     }
 }

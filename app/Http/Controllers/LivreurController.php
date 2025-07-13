@@ -120,19 +120,52 @@ public function dashboarde()
     ));
 }
 private function sendPushNotification($fcmToken, $title, $body)
-{
-    if (!$fcmToken) {
-        \Log::error("Échec de l'envoi de la notification : aucun token FCM disponible.");
-        return false; 
+    {
+        if (!$fcmToken) {
+            \Log::error("Échec de l'envoi de la notification : aucun token FCM disponible.");
+            return false; 
+        }
+
+        try {
+            // Utiliser le service Firebase configuré
+            $firebase = app('firebase');
+            $messaging = $firebase->createMessaging();
+
+            $message = \Kreait\Firebase\Messaging\CloudMessage::withTarget('token', $fcmToken)
+                ->withNotification(\Kreait\Firebase\Messaging\Notification::create($title, $body))
+                ->withData([
+                    'click_action' => 'FLUTTER_NOTIFICATION_CLICK',
+                    'sound' => 'default',
+                    'type' => 'commande'
+                ]);
+
+            $result = $messaging->send($message);
+            
+            \Log::info("Notification envoyée avec succès", [
+                'token' => substr($fcmToken, 0, 10) . '...',
+                'title' => $title,
+                'result' => $result
+            ]);
+
+            return true;
+
+        } catch (\Kreait\Firebase\Exception\MessagingException $e) {
+            \Log::error("Erreur Firebase Messaging", [
+                'error' => $e->getMessage(),
+                'token' => substr($fcmToken, 0, 10) . '...',
+                'title' => $title
+            ]);
+            return false;
+        } catch (\Exception $e) {
+            \Log::error("Erreur générale lors de l'envoi de la notification", [
+                'error' => $e->getMessage(),
+                'token' => substr($fcmToken, 0, 10) . '...',
+                'title' => $title
+            ]);
+            return false;
+        }
     }
 
-    $messaging = app(Firebase::class);
-
-    $message = CloudMessage::withTarget('token', $fcmToken)
-        ->withNotification(Notification::create($title, $body));
-
-    $messaging->send($message);
-}
 
 
     /**
@@ -186,58 +219,58 @@ private function sendPushNotification($fcmToken, $title, $body)
     /**
      * Démarrer une livraison
      */
-    public function demarrerLivraison(Request $request, $commandeId)
-    {
-        $commande = Commnande::where('id', $commandeId)
-                            ->where('driver_id', Auth::id())
-                            ->where('status', 'acceptee')
-                            ->firstOrFail();
+    // public function demarrerLivraison(Request $request, $commandeId)
+    // {
+    //     $commande = Commnande::where('id', $commandeId)
+    //                         ->where('driver_id', Auth::id())
+    //                         ->where('status', 'acceptee')
+    //                         ->firstOrFail();
 
-        $commande->status = 'en_cours';
-        $commande->date_debut_livraison = now();
-        $commande->save();
+    //     $commande->status = 'en_cours';
+    //     $commande->date_debut_livraison = now();
+    //     $commande->save();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Livraison démarrée!',
-            'commande' => $commande
-        ]);
-    }
+    //     return response()->json([
+    //         'success' => true,
+    //         'message' => 'Livraison démarrée!',
+    //         'commande' => $commande
+    //     ]);
+    // }
 
     /**
      * Terminer une livraison
      */
-    public function terminerLivraison(Request $request, $commandeId)
-    {
-        $request->validate([
-            'code_confirmation' => 'sometimes|string|max:10',
-            'commentaire' => 'nullable|string|max:500',
-            'photo_livraison' => 'sometimes|image|max:2048'
-        ]);
+    // public function terminerLivraison(Request $request, $commandeId)
+    // {
+    //     $request->validate([
+    //         'code_confirmation' => 'sometimes|string|max:10',
+    //         'commentaire' => 'nullable|string|max:500',
+    //         'photo_livraison' => 'sometimes|image|max:2048'
+    //     ]);
 
-        $commande = Commnande::where('id', $commandeId)
-                            ->where('driver_id', Auth::id())
-                            ->where('status', 'en_cours')
-                            ->firstOrFail();
+    //     $commande = Commnande::where('id', $commandeId)
+    //                         ->where('driver_id', Auth::id())
+    //                         ->where('status', 'en_cours')
+    //                         ->firstOrFail();
 
-        // Gérer l'upload de photo si présente
-        $photoPath = null;
-        if ($request->hasFile('photo_livraison')) {
-            $photoPath = $request->file('photo_livraison')->store('livraisons', 'public');
-        }
+    //     // Gérer l'upload de photo si présente
+    //     $photoPath = null;
+    //     if ($request->hasFile('photo_livraison')) {
+    //         $photoPath = $request->file('photo_livraison')->store('livraisons', 'public');
+    //     }
 
-        $commande->status = 'livree';
-        $commande->date_livraison = now();
-        $commande->commentaire_livraison = $request->commentaire;
-        $commande->photo_livraison = $photoPath;
-        $commande->save();
+    //     $commande->status = 'livree';
+    //     $commande->date_livraison = now();
+    //     $commande->commentaire_livraison = $request->commentaire;
+    //     $commande->photo_livraison = $photoPath;
+    //     $commande->save();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Livraison terminée avec succès!',
-            'commande' => $commande
-        ]);
-    }
+    //     return response()->json([
+    //         'success' => true,
+    //         'message' => 'Livraison terminée avec succès!',
+    //         'commande' => $commande
+    //     ]);
+    // }
 
     /**
      * Mes commandes en cours

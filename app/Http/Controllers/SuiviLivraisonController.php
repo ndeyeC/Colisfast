@@ -6,13 +6,12 @@ use Illuminate\Http\Request;
 use App\Models\Commnande;
 use App\Models\User;
 
-
 class SuiviLivraisonController extends Controller
 {
     public function index(Request $request)
     {
         $query = Commnande::with(['user', 'driver'])
-            ->whereNotNull('driver_id'); 
+            ->whereNotNull('driver_id');
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -32,12 +31,12 @@ class SuiviLivraisonController extends Controller
 
         if ($request->filled('search')) {
             $search = $request->search;
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('id', 'like', "%{$search}%")
-                  ->orWhereHas('user', function($userQuery) use ($search) {
-                      $userQuery->where('name', 'like', "%{$search}%")
-                               ->orWhere('email', 'like', "%{$search}%");
-                  });
+                    ->orWhereHas('user', function ($userQuery) use ($search) {
+                        $userQuery->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    });
             });
         }
 
@@ -45,12 +44,7 @@ class SuiviLivraisonController extends Controller
 
         $stats = $this->getStatistiques();
 
-        // Liste des livreurs pour le filtre
-        // $livreurs = User::whereHas('role', function($q) {
-        //     $q->where('name', 'livreur');
-        // })->get();
         $livreurs = User::where('role', 'livreur')->get();
-
 
         return view('admin.livraisons.index', compact('livraisons', 'stats', 'livreurs'));
     }
@@ -62,12 +56,16 @@ class SuiviLivraisonController extends Controller
 
         $problemeSignale = null;
         if ($livraison->probleme_signale) {
-            $problemeSignale = json_decode($livraison->probleme_signale, true);
+            // Si string JSON, on décode, sinon on prend directement le tableau
+            if (is_string($livraison->probleme_signale)) {
+                $problemeSignale = json_decode($livraison->probleme_signale, true);
+            } else {
+                $problemeSignale = $livraison->probleme_signale;
+            }
         }
 
         return view('admin.livraisons.show', compact('livraison', 'problemeSignale'));
     }
-    
 
     public function updateStatus(Request $request, $id)
     {
@@ -86,7 +84,7 @@ class SuiviLivraisonController extends Controller
 
         $livraison = Commnande::findOrFail($id);
         $ancienStatut = $livraison->status;
-        
+
         $livraison->update([
             'status' => $request->status,
             'updated_at' => now()
@@ -104,8 +102,8 @@ class SuiviLivraisonController extends Controller
         ]);
 
         $livraison = Commnande::findOrFail($id);
-        
-        $driver = User::whereHas('role', function($q) {
+
+        $driver = User::whereHas('role', function ($q) {
             $q->where('name', 'livreur');
         })->findOrFail($request->driver_id);
 
@@ -126,12 +124,14 @@ class SuiviLivraisonController extends Controller
         ]);
 
         $livraison = Commnande::findOrFail($id);
-        
+
         if (!$livraison->probleme_signale) {
             return redirect()->back()->with('error', 'Aucun problème signalé pour cette livraison');
         }
 
-        $probleme = json_decode($livraison->probleme_signale, true);
+        // Gestion correcte du cast : si string on décode, sinon on prend direct
+        $probleme = is_string($livraison->probleme_signale) ? json_decode($livraison->probleme_signale, true) : $livraison->probleme_signale;
+
         $probleme['status'] = 'traite';
         $probleme['action_admin'] = $request->action;
         $probleme['commentaire_admin'] = $request->commentaire_admin;
@@ -163,70 +163,39 @@ class SuiviLivraisonController extends Controller
 
         return redirect()->back()->with('success', 'Problème traité avec succès');
     }
-
-    // public function problemesSignales()
-    // {
-    //     $livraisons = Commnande::whereNotNull('probleme_signale')
-    //         ->with(['user', 'driver'])
-    //         ->orderBy('updated_at', 'desc')
-    //         ->paginate(10);
-
-    //     // Décoder les problèmes pour chaque livraison
-    //     $livraisons->getCollection()->transform(function ($livraison) {
-    //         $livraison->probleme_decode = json_decode($livraison->probleme_signale, true);
-    //         return $livraison;
-    //     });
-
-    //     return view('admin.livraisons.problemes', compact('livraisons'));
-    // }
-
-   public function problemesSignales()
+public function problemesSignales()
 {
-    
-    $livraisons = Commnande::with([
-            'user:user_id,name',  
-            'driver:user_id,name'
-        ])
+    $livraisons = Commnande::with(['user', 'driver']) // ✅ Correction ici
         ->where('status', 'probleme_signale')
         ->whereNotNull('probleme_signale')
         ->orderBy('updated_at', 'desc')
         ->paginate(10);
 
+    // Décodage sécurisé
     $livraisons->getCollection()->transform(function ($livraison) {
-        try {
-            $livraison->probleme_decode = is_array($livraison->probleme_signale)
-                ? $livraison->probleme_signale
-                : json_decode($livraison->probleme_signale, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\Exception $e) {
-            $livraison->probleme_decode = [
-                'error' => 'Erreur de décodage',
-                'raw_data' => $livraison->probleme_signale
-            ];
+        $probleme = $livraison->probleme_signale;
+
+        if (is_string($probleme)) {
+            try {
+                $probleme = json_decode($probleme, true, 512, JSON_THROW_ON_ERROR);
+            } catch (\Exception $e) {
+                $probleme = [
+                    'error' => 'Erreur de décodage JSON',
+                    'raw_data' => $livraison->probleme_signale
+                ];
+            }
         }
 
-        if ($livraison->relationLoaded('user')) {
-            $livraison->user->name = $livraison->user->nom ?? 'N/A';
-        }
-        
-        if ($livraison->relationLoaded('driver')) {
-            $livraison->driver->name = $livraison->driver->nom ?? 'N/A';
-        }
+        $livraison->probleme_decode = $probleme;
 
         return $livraison;
     });
 
-    // 3. Journalisation pour débogage (optionnel)
-    if ($livraisons->isEmpty()) {
-        \Log::info('Aucun problème signalé trouvé', [
-            'query' => DB::getQueryLog(),
-            'count_total' => Commnande::where('status', 'probleme_signale')->count()
-        ]);
-    }
     $livreurs = User::where('role', 'livreur')->get();
 
-
-    return view('admin.livraisons.problemes', compact('livraisons','livreurs'));
+    return view('admin.livraisons.problemes', compact('livraisons', 'livreurs'));
 }
+
 
     private function getStatistiques()
     {
@@ -245,7 +214,6 @@ class SuiviLivraisonController extends Controller
 
     private function logChangementStatut($livraison, $ancienStatut, $nouveauStatut, $commentaire = null)
     {
-        // Vous pouvez créer une table de logs ou utiliser le système de logs Laravel
         \Log::info('Changement de statut de livraison', [
             'livraison_id' => $livraison->id,
             'ancien_statut' => $ancienStatut,
@@ -258,17 +226,16 @@ class SuiviLivraisonController extends Controller
 
     public function export(Request $request)
     {
-        // Logique d'export CSV/Excel
         $query = Commnande::with(['user', 'driver'])->whereNotNull('driver_id');
-        
+
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
-        
+
         if ($request->filled('date_debut')) {
             $query->whereDate('created_at', '>=', $request->date_debut);
         }
-        
+
         if ($request->filled('date_fin')) {
             $query->whereDate('created_at', '<=', $request->date_fin);
         }
@@ -276,18 +243,17 @@ class SuiviLivraisonController extends Controller
         $livraisons = $query->get();
 
         $filename = 'livraisons_' . date('Y-m-d_H-i-s') . '.csv';
-        
+
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => 'attachment; filename="' . $filename . '"'
         ];
 
-        $callback = function() use ($livraisons) {
+        $callback = function () use ($livraisons) {
             $file = fopen('php://output', 'w');
-            
-            // En-têtes CSV
+
             fputcsv($file, [
-                'ID', 'Client', 'Email Client', 'Livreur', 'Adresse Départ', 
+                'ID', 'Client', 'Email Client', 'Livreur', 'Adresse Départ',
                 'Adresse Arrivée', 'Statut', 'Prix', 'Date Création', 'Date Livraison'
             ]);
 
@@ -305,39 +271,10 @@ class SuiviLivraisonController extends Controller
                     $livraison->updated_at->format('d/m/Y H:i')
                 ]);
             }
-            
+
             fclose($file);
         };
 
         return response()->stream($callback, 200, $headers);
     }
-
-  public function showJson($id)
-{
-    $livraison = Livraison::with(['probleme', 'client', 'driver'])->find($id);
-
-    if (!$livraison) {
-        return response()->json(['message' => 'Livraison non trouvée'], 404);
-    }
-
-    if (!$livraison->probleme) {
-        return response()->json(['message' => 'Problème non trouvé'], 404);
-    }
-
-    return response()->json([
-        'livraison' => [
-            'id' => $livraison->id,
-            'client_name' => $livraison->client->name ?? 'N/A',
-            'driver_name' => $livraison->driver->name ?? 'N/A',
-        ],
-        'probleme' => [
-            'type_probleme' => str_replace('_', ' ', $livraison->probleme->type_probleme),
-            'date_signalement' => $livraison->probleme->date_signalement ?? $livraison->probleme->created_at,
-            'description' => $livraison->probleme->description,
-            'photo' => $livraison->probleme->photo,
-        ]
-    ]);
-}
-
-
 }

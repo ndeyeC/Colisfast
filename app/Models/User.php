@@ -17,7 +17,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
       *
       * @var list<string>
       */
- use Notifiable;
 
  protected $table = 'users';
 protected $primaryKey = 'user_id';

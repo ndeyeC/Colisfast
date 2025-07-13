@@ -84,12 +84,17 @@ public static function statutsDuLivreur(): array
         'details_adresse_depart',
         'lat_depart',
         'lat_arrivee',
+        'commentaire_livraison',
         'lng_depart',
         'lng_arrivee',
         'driver_id' ,
         'temps_livraison',
         'livraison_complete',
-        'probleme_signale'
+        'probleme_signale',
+        'numero_telephone',
+        'raison_annulation',
+        'date_annulation'
+
 
 
 
@@ -143,6 +148,8 @@ public function deliveryRoute()
         }
         return $query;
     }
+
+    
 
     // Méthodes utilitaires
     public function isLivree(): bool

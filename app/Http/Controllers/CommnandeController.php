@@ -12,18 +12,20 @@ use App\Services\CinetPayService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 use App\Notifications\SupportColisfast;
 use App\Services\GeocodingService;
 
 class CommnandeController extends Controller
 {
-    const SUPPLEMENT_STANDARD = 500;  // FCFA
+    const SUPPLEMENT_STANDARD = 50;  // FCFA
     const SUPPLEMENT_EXPRESS = 1000;  // FCFA
     
     protected $cinetPayService; 
-    public function __construct(CinetPayService $cinetPayService) 
+    public function __construct(CinetPayService $cinetPayService, GeocodingService $geocodingService) 
     {
         $this->cinetPayService = $cinetPayService; 
+        $this->geocodingService = $geocodingService;
     }
     
 
@@ -43,195 +45,368 @@ class CommnandeController extends Controller
         return view('commnandes.create', compact('zones', 'tarifs', 'supplements'));
     }
 
-    public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'adresse_depart' => 'required|string|max:255',
-            'adresse_arrivee' => 'required|string|max:255',
-            'details_adresse_depart' => 'nullable|string|max:255', 
-            'details_adresse_arrivee' => 'nullable|string|max:255',
-            'type_colis' => 'required|string',
-            'type_livraison' => 'required|in:standard,express',
-            'prix' => 'sometimes|numeric',
-            'region_depart' => 'sometimes|string',
-            'region_arrivee' => 'sometimes|string',
-            'type_zone' => 'sometimes|string',
-            'mode_paiement' => 'required|string|in:wave,orange money,tokens',
-            // Ajout des champs client pour CinetPay
-            'customer_name' => 'sometimes|string|max:100',
-            'customer_surname' => 'sometimes|string|max:100',
-            'customer_email' => 'sometimes|email|max:100',
-            'customer_phone' => 'sometimes|string|max:20'
-        ]);
+    // public function store(Request $request)
+    // {
+    //     $validated = $request->validate([
+    //         'adresse_depart' => 'required|string|max:255',
+    //         'adresse_arrivee' => 'required|string|max:255',
+    //         'details_adresse_depart' => 'nullable|string|max:255', 
+    //         'details_adresse_arrivee' => 'nullable|string|max:255',
+    //         'type_colis' => 'required|string',
+    //         'type_livraison' => 'required|in:standard,express',
+    //         'prix' => 'sometimes|numeric',
+    //         'region_depart' => 'sometimes|string',
+    //          'numero_telephone' => 'required|string|max:20',
+    //         'region_arrivee' => 'sometimes|string',
+    //         'type_zone' => 'sometimes|string',
+    //         'mode_paiement' => 'required|string|in:wave,orange money,tokens',
+    //         // Ajout des champs client pour CinetPay
+    //         'customer_name' => 'sometimes|string|max:100',
+    //         'customer_surname' => 'sometimes|string|max:100',
+    //         'customer_email' => 'sometimes|email|max:100',
+    //         'customer_phone' => 'sometimes|string|max:20'
+    //     ]);
 
-        if ($request->filled('region_depart') && $request->filled('region_arrivee')) {
-            $regionDepart = $request->region_depart;
-            $regionArrivee = $request->region_arrivee;
-        } else {
+    //     if ($request->filled('region_depart') && $request->filled('region_arrivee')) {
+    //         $regionDepart = $request->region_depart;
+    //         $regionArrivee = $request->region_arrivee;
+    //     } else {
 
-            $regionDepart = $this->extraireRegion($validated['adresse_depart']);
-            $regionArrivee = $this->extraireRegion($validated['adresse_arrivee']);
-        }
+    //         $regionDepart = $this->extraireRegion($validated['adresse_depart']);
+    //         $regionArrivee = $this->extraireRegion($validated['adresse_arrivee']);
+    //     }
+
+    //     if (!$regionDepart || !$regionArrivee) {
+    //         return redirect()->back()
+    //             ->with('error', 'Impossible de déterminer les régions à partir des adresses fournies.')
+    //             ->withInput();
+    //     }
+
+    //     if ($request->filled('prix')) {
+    //         $prixBase = $request->prix;
+    //     } else {
+    //         $tarif = $this->findTarifSansLivraison($regionDepart, $regionArrivee, $validated['type_colis']);
+
+    //         if (!$tarif) {
+    //             return redirect()->back()
+    //                 ->with('error', 'Aucun tarif disponible pour cette combinaison.')
+    //                 ->withInput();
+    //         }
+            
+    //         $prixBase = $tarif->prix;
+    //     }
+
+    //     $prixFinal = $this->calculerPrixAvecSupplement($prixBase, $validated['type_livraison']);
+
+
+       
+    //     $reference = 'CMD-' . strtoupper(Str::random(8));
+        
+    //     // Créer la commande en attente de paiement
+    //     $commande = new Commnande();
+    //     $commande->reference = $reference;
+    //     $commande->adresse_depart = $validated['adresse_depart'];
+    //     $commande->adresse_arrivee = $validated['adresse_arrivee'];
+    //     $commande->details_adresse_depart = $validated['details_adresse_depart']; 
+    //     $commande->details_adresse_arrivee = $validated['details_adresse_arrivee'];
+    //     $commande->region_depart = $regionDepart;
+    //     $commande->region_arrivee = $regionArrivee;
+    //     $commande->type_zone = $request->type_zone ?? null;
+    //     $commande->type_colis = $validated['type_colis'];
+    //     $commande->type_livraison = $validated['type_livraison'];
+    //     $commande->prix_base = $prixBase;
+    //      $commande->numero_telephone = $validated['numero_telephone']; // Stocker le téléphone
+    //     $commande->prix_final = $prixFinal;
+    //     $commande->status = 'en_attente_paiement';
+    //     $commande->mode_paiement = $validated['mode_paiement'];
+    //     $commande->user_id = Auth::id();
+    //     $commande->save();
+
+       
+    //     // Rediriger vers CinetPay
+    //     return $this->redirectToCinetPay($commande, $validated);
+    // }
+
+
+   public function store(Request $request)
+{
+    $validated = $request->validate([
+        'adresse_depart' => 'required|string|max:255',
+        'adresse_arrivee' => 'required|string|max:255',
+        'details_adresse_depart' => 'nullable|string|max:255',
+        'details_adresse_arrivee' => 'nullable|string|max:255',
+        'type_colis' => 'required|string|in:0-5 kg,5-20 kg,20-50 kg,50+ kg',
+        'type_livraison' => 'required|in:standard,express',
+        'prix' => 'sometimes|numeric|min:0',
+        'region_depart' => 'sometimes|string|max:255',
+        'region_arrivee' => 'sometimes|string|max:255',
+        'type_zone' => 'sometimes|string|max:255',
+        'numero_telephone' => 'required|string|max:20',
+        'mode_paiement' => 'required|string|in:wave,orange,tokens',
+        'customer_name' => 'sometimes|string|max:100',
+        'customer_surname' => 'sometimes|string|max:100',
+        'customer_email' => 'sometimes|email|max:100',
+        'customer_phone' => 'sometimes|string|max:20'
+    ]);
+
+    DB::beginTransaction();
+    try {
+        // Extraire les régions si non fournies
+        $regionDepart = $request->filled('region_depart') ? $request->region_depart : $this->extraireRegion($validated['adresse_depart']);
+        $regionArrivee = $request->filled('region_arrivee') ? $request->region_arrivee : $this->extraireRegion($validated['adresse_arrivee']);
 
         if (!$regionDepart || !$regionArrivee) {
-            return redirect()->back()
-                ->with('error', 'Impossible de déterminer les régions à partir des adresses fournies.')
-                ->withInput();
+            throw new \Exception('Impossible de déterminer les régions à partir des adresses fournies.');
         }
 
-        if ($request->filled('prix')) {
-            $prixBase = $request->prix;
-        } else {
-            $tarif = $this->findTarifSansLivraison($regionDepart, $regionArrivee, $validated['type_colis']);
-
-            if (!$tarif) {
-                return redirect()->back()
-                    ->with('error', 'Aucun tarif disponible pour cette combinaison.')
-                    ->withInput();
-            }
-            
-            $prixBase = $tarif->prix;
+        // Calculer le prix de base
+        $prixBase = $request->filled('prix') ? $request->prix : ($this->findTarifSansLivraison($regionDepart, $regionArrivee, $validated['type_colis'])->prix ?? null);
+        if (!$prixBase) {
+            throw new \Exception('Aucun tarif disponible pour cette combinaison.');
         }
 
         $prixFinal = $this->calculerPrixAvecSupplement($prixBase, $validated['type_livraison']);
 
+        // Géocoder les adresses
+        $departCoordinates = $this->geocodingService->geocode($validated['adresse_depart']);
+        if (!$departCoordinates) {
+            throw new \Exception("Impossible de géocoder l'adresse de départ : {$validated['adresse_depart']}");
+        }
 
-       
+        $arriveeCoordinates = $this->geocodingService->geocode($validated['adresse_arrivee']);
+        if (!$arriveeCoordinates) {
+            throw new \Exception("Impossible de géocoder l'adresse de destination : {$validated['adresse_arrivee']}");
+        }
+
+        // Créer la commande
         $reference = 'CMD-' . strtoupper(Str::random(8));
-        
-        // Créer la commande en attente de paiement
-        $commande = new Commnande();
-        $commande->reference = $reference;
-        $commande->adresse_depart = $validated['adresse_depart'];
-        $commande->adresse_arrivee = $validated['adresse_arrivee'];
-        $commande->details_adresse_depart = $validated['details_adresse_depart']; 
-        $commande->details_adresse_arrivee = $validated['details_adresse_arrivee'];
-        $commande->region_depart = $regionDepart;
-        $commande->region_arrivee = $regionArrivee;
-        $commande->type_zone = $request->type_zone ?? null;
-        $commande->type_colis = $validated['type_colis'];
-        $commande->type_livraison = $validated['type_livraison'];
-        $commande->prix_base = $prixBase;
-        $commande->prix_final = $prixFinal;
-        $commande->status = 'en_attente_paiement';
-        $commande->mode_paiement = $validated['mode_paiement'];
-        $commande->user_id = Auth::id();
-        $commande->save();
+        $commande = Commnande::create([
+            'reference' => $reference,
+            'adresse_depart' => $validated['adresse_depart'],
+            'details_adresse_depart' => $validated['details_adresse_depart'],
+            'adresse_arrivee' => $validated['adresse_arrivee'],
+            'details_adresse_arrivee' => $validated['details_adresse_arrivee'],
+            'region_depart' => $regionDepart,
+            'region_arrivee' => $regionArrivee,
+            'type_zone' => $request->type_zone ?? null,
+            'type_colis' => $validated['type_colis'],
+            'type_livraison' => $validated['type_livraison'],
+            'prix_base' => $prixBase,
+            'prix_final' => $prixFinal,
+            'numero_telephone' => $validated['numero_telephone'],
+            'status' => 'en_attente_paiement',
+            'mode_paiement' => $validated['mode_paiement'],
+            'user_id' => Auth::id(),
+            'lat_depart' => $departCoordinates['lat'],
+            'lng_depart' => $departCoordinates['lon'],
+            'lat_arrivee' => $arriveeCoordinates['lat'],
+            'lng_arrivee' => $arriveeCoordinates['lon'],
+        ]);
 
-        //         // Notifier les livreurs a regarder plus tard
-// $livreurs = User::where('role', 'livreur')->get(); // ou adapte selon ta logique
-// Notification::send($livreurs, new SupportColisfast($commande));
+        // Log de l'activité
+        Log::info('Commande créée avec succès', [
+            'commnande_id' => $commande->id,
+            'user_id' => Auth::id(),
+            'reference' => $reference,
+            'adresse_depart' => $validated['adresse_depart'],
+            'adresse_arrivee' => $validated['adresse_arrivee'],
+            'lat_depart' => $departCoordinates['lat'],
+            'lng_depart' => $departCoordinates['lon'],
+            'lat_arrivee' => $arriveeCoordinates['lat'],
+            'lng_arrivee' => $arriveeCoordinates['lon'],
+        ]);
 
+        DB::commit();
 
-        //  Si paiement par jetons, traiter directement
-        //  if ($validated['mode_paiement'] === 'tokens') {
-        //     return $this->processTokenPayment($commande);
-        //  }
-        
-        // //  Sinon, rediriger vers PayTech
-        
-    
-
-        // Rediriger vers CinetPay
+        // Rediriger vers CinetPay pour le paiement
         return $this->redirectToCinetPay($commande, $validated);
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error('Erreur lors de la création de la commande', [
+            'error' => $e->getMessage(),
+            'request_data' => $request->all(),
+        ]);
+        return redirect()->back()
+            ->with('error', 'Erreur lors de la création de la commande : ' . $e->getMessage())
+            ->withInput();
     }
+}
+
+    
 
     /**
      * Rediriger vers CinetPay pour le paiement
      */
-    private function redirectToCinetPay(Commnande $commande, array $customerData = [])
+//  private function redirectToCinetPay(Commnande $commande, array $customerData = [])
+// {
+//     try {
+//         // Vérifier la validité de la commande
+//         if (!$commande || !$commande->id) {
+//             return back()->with('error', 'Commande invalide');
+//         }
+
+//         // 🔁 Utilise ngrok en local, sinon l’URL réelle du site
+//         $baseUrl = app()->environment('local')
+//             ? 'https://b49175698ab2.ngrok-free.app' 
+//             : url('/');
+
+        
+//         $urls = [
+//             'success' => $baseUrl . '/commnandes/payment/success',
+//             'ipn'     => $baseUrl . '/commnandes/payment/ipn',
+//             'cancel'  => $baseUrl . '/commnandes/payment/cancel',
+//         ];
+
+//         // Log pour vérification
+//         foreach ($urls as $key => $url) {
+//             if (!filter_var($url, FILTER_VALIDATE_URL)) {
+//                 Log::error("Invalid URL format for $key: $url");
+//                 return back()->with('error', "Configuration incorrecte: URL de $key invalide");
+//             }
+//         }
+
+//         // Préparer les données à envoyer à CinetPay
+//         $paymentData = [
+//             'item_name'      => 'Livraison ' . $commande->reference,
+//             'item_price'     => (float)$commande->prix_final,
+//             'ref_command'    => $commande->reference,
+//             'success_url'    => $urls['success'],
+//             'ipn_url'        => $urls['ipn'],
+//             'cancel_url'     => $urls['cancel'],
+//             'custom_field'   => [
+//                 'commande_id' => $commande->id,
+//                 'user_id'     => $commande->user_id
+//             ],
+//             'customer_name'    => $customerData['customer_name'] ?? Auth::user()->name ?? '',
+//             'customer_surname' => $customerData['customer_surname'] ?? '',
+//             'customer_email'   => $customerData['customer_email'] ?? Auth::user()->email ?? '',
+//             'customer_phone'   => $customerData['customer_phone'] ?? '',
+//             'customer_address' => $commande->adresse_depart ?? '',
+//             'customer_city'    => $commande->region_depart ?? '',
+//             'customer_country' => 'SN',
+//             'customer_state'   => '',
+//             'customer_zip'     => ''
+//         ];
+
+//         Log::info('CinetPay payment request data:', $paymentData);
+
+//         // Vérification des clés de config
+//         if (
+//             empty(config('cinetpay.api_key')) ||
+//             empty(config('cinetpay.site_id')) ||
+//             empty(config('cinetpay.secret_key'))
+//         ) {
+//             Log::error('Configuration CinetPay manquante');
+//             return back()->with('error', 'Erreur de configuration du système de paiement');
+//         }
+
+//         // Envoie vers CinetPay via le service
+//         $response = $this->cinetPayService->createPaymentRequest($paymentData);
+
+//         if (!$response['success']) {
+//             Log::error('Erreur CinetPay:', $response);
+
+//             $errorMessage = $response['message'] ?? 'Erreur de paiement inconnue';
+
+//             if (isset($response['status_code']) && $response['status_code'] === 422) {
+//                 $errors = $response['errors'] ?? [];
+//                 $errorList = is_array($errors) ? implode(', ', $errors) : (string)$errors;
+//                 return back()->with('error', "Erreur de validation: $errorList");
+//             }
+
+//             return back()->with('error', $errorMessage);
+//         }
+
+//         if (empty($response['data']['token']) || empty($response['data']['redirect_url'])) {
+//             Log::error('Réponse CinetPay incomplète:', $response);
+//             return back()->with('error', 'Réponse incomplète du système de paiement');
+//         }
+
+//         // Sauvegarde du token
+//         $commande->payment_token = $response['data']['token'];
+//         $commande->save();
+
+//         // 🔁 Redirection vers la page de paiement CinetPay
+//         return redirect()->away($response['data']['redirect_url']);
+
+//     } catch (\Exception $e) {
+//         Log::error('Exception CinetPay:', [
+//             'message' => $e->getMessage(),
+//             'file' => $e->getFile(),
+//             'line' => $e->getLine()
+//         ]);
+
+//         return back()->with('error', 'Erreur système: ' . $e->getMessage());
+//     }
+// }
+
+private function redirectToCinetPay(Commnande $commande, array $validated)
     {
         try {
-            // Vérifier la validité de la commande
-            if (!$commande || !$commande->id) {
-                return back()->with('error', 'Commande invalide');
+            // Construire les URLs avec config('app.url') et route()
+            $successUrl = rtrim(config('app.url'), '/') . route('commnandes.payment.success', [], false);
+            $ipnUrl = rtrim(config('app.url'), '/') . route('commnandes.payment.ipn', [], false);
+            $cancelUrl = rtrim(config('app.url'), '/') . route('commnandes.payment.cancel', [], false);
+
+            // Valider les URLs
+            if (!filter_var($successUrl, FILTER_VALIDATE_URL) || 
+                !filter_var($ipnUrl, FILTER_VALIDATE_URL) || 
+                !filter_var($cancelUrl, FILTER_VALIDATE_URL)) {
+                throw new \Exception('Invalid URL format for CinetPay: success=' . $successUrl . ', ipn=' . $ipnUrl . ', cancel=' . $cancelUrl);
             }
 
-            $baseUrl = url('/');
-
-           
-            $urls = [
-        'success' => route('commnandes.payment.success'), 
-       'ipn' => route('commnandes.payment.ipn'),
-       'cancel' => route('commnandes.payment.cancel')
-   ];
-
-            foreach ($urls as $key => $url) {
-                if (!filter_var($url, FILTER_VALIDATE_URL)) {
-                    Log::error("Invalid URL format for $key: $url");
-                    return back()->with('error', "Configuration incorrecte: URL de $key invalide");
-                }
-            }
-
-            // Préparer les données de paiement pour CinetPay
+            // Données pour la requête CinetPay
             $paymentData = [
-                'item_name' => 'Livraison ' . $commande->reference,
-                'item_price' => (float)$commande->prix_final,
+                'item_name' => "Livraison {$commande->reference}",
+                'item_price' => $commande->prix_final,
                 'ref_command' => $commande->reference,
-                'success_url' => $urls['success'],
-                'ipn_url' => $urls['ipn'],
-                'cancel_url' => $urls['cancel'],
+                'success_url' => $successUrl,
+                'ipn_url' => $ipnUrl,
+                'cancel_url' => $cancelUrl,
                 'custom_field' => [
                     'commande_id' => $commande->id,
-                    'user_id' => $commande->user_id
+                    'user_id' => Auth::id()
                 ],
-                // Informations client pour CinetPay
-                'customer_name' => $customerData['customer_name'] ?? Auth::user()->name ?? '',
-                'customer_surname' => $customerData['customer_surname'] ?? '',
-                'customer_email' => $customerData['customer_email'] ?? Auth::user()->email ?? '',
-                'customer_phone' => $customerData['customer_phone'] ?? '',
-                'customer_address' => $commande->adresse_depart ?? '',
-                'customer_city' => $commande->region_depart ?? '',
+                'customer_name' => $validated['customer_name'] ?? '',
+                'customer_surname' => $validated['customer_surname'] ?? '',
+                'customer_email' => $validated['customer_email'] ?? '',
+                'customer_phone' => $validated['customer_phone'] ?? '',
+                'customer_address' => $validated['adresse_depart'],
+                'customer_city' => $validated['region_depart'] ?? '',
                 'customer_country' => 'SN',
                 'customer_state' => '',
                 'customer_zip' => ''
             ];
 
-            Log::info('CinetPay payment request data:', $paymentData);
+            Log::info('CinetPay payment request data', $paymentData);
 
-            if (empty(config('cinetpay.api_key')) || empty(config('cinetpay.site_id')) || empty(config('cinetpay.secret_key'))) {
-                Log::error('Configuration CinetPay manquante');
-                return back()->with('error', 'Erreur de configuration du système de paiement');
-            }
-
-            // Envoyer vers CinetPay
+            // Appeler le service CinetPay
             $response = $this->cinetPayService->createPaymentRequest($paymentData);
-            
+
             if (!$response['success']) {
-                Log::error('Erreur CinetPay:', $response);
-                
-                $errorMessage = $response['message'] ?? 'Erreur de paiement inconnue';
-                
-                if (isset($response['status_code']) && $response['status_code'] === 422) {
-                    $errors = $response['errors'] ?? [];
-                    $errorList = is_array($errors) ? implode(', ', $errors) : (string)$errors;
-                    return back()->with('error', "Erreur de validation: $errorList");
-                }
-                
-                return back()->with('error', $errorMessage);
+                throw new \Exception($response['message']);
             }
 
-            if (empty($response['data']['token']) || empty($response['data']['redirect_url'])) {
-                Log::error('Réponse CinetPay incomplète:', $response);
-                return back()->with('error', 'Réponse incomplète du système de paiement');
-            }
-
-            $commande->payment_token = $response['data']['token'];
-            $commande->save();
-
-            // Rediriger vers CinetPay
-            return redirect()->away($response['data']['redirect_url']);
-            
-        } catch (\Exception $e) {
-            Log::error('Exception CinetPay:', [
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine()
+            Log::info('CinetPay payment initiated', [
+                'commande_id' => $commande->id,
+                'transaction_id' => $response['data']['transaction_id'],
+                'payment_url' => $response['data']['redirect_url']
             ]);
-            
-            return back()->with('error', 'Erreur système: ' . $e->getMessage());
+
+            return redirect($response['data']['redirect_url']);
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de la redirection vers CinetPay', [
+                'error' => $e->getMessage(),
+                'commande_id' => $commande->id,
+                'payment_data' => $paymentData ?? []
+            ]);
+            return redirect()->back()
+                ->with('error', 'Erreur lors de la redirection vers le paiement : ' . $e->getMessage())
+                ->withInput();
         }
     }
+
+
 
     /**
      * Callback IPN (Instant Payment Notification) de CinetPay

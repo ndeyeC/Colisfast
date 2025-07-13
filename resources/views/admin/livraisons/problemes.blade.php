@@ -83,9 +83,10 @@
                     </div>
                     <div class="text-end">
                         @if(($probleme['status'] ?? 'en_attente') === 'en_attente')
-                            <button class="btn btn-sm btn-warning" onclick="traiterProbleme({{ $livraison->id }})">
-                                <i class="fas fa-tools"></i> Traiter
-                            </button>
+                            <button type="button" class="btn btn-sm btn-warning" onclick="traiterProbleme({{ $livraison->id }})">
+                           <i class="fas fa-tools"></i> Traiter
+                         </button>
+
                         @endif
                         <a href="{{ route('admin.livraisons.show', $livraison->id) }}" class="btn btn-sm btn-outline-primary">
                             <i class="fas fa-eye"></i> Voir détails
@@ -180,83 +181,36 @@
 
 <!-- Modal pour traiter les problèmes -->
 <div class="modal fade" id="modalTraiterProbleme" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header bg-warning text-dark">
-                <h5 class="modal-title">
-                    <i class="fas fa-tools"></i> Traiter le Problème Signalé
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form id="formTraiterProbleme" method="POST">
-                @csrf
-                <div class="modal-body">
-                    <div id="detailsProblemeModal"></div>
-                    
-                    <hr>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">
-                            <i class="fas fa-cogs"></i> Action à effectuer *
-                        </label>
-                        <select class="form-select" name="action" required>
-                            <option value="">Choisir une action</option>
-                            <option value="resolu">
-                                <i class="fas fa-check"></i> Marquer comme résolu (continuer la livraison)
-                            </option>
-                            <option value="reassigner">
-                                <i class="fas fa-user-edit"></i> Réassigner à un autre livreur
-                            </option>
-                            <option value="annuler">
-                                <i class="fas fa-times"></i> Annuler la commande
-                            </option>
-                        </select>
-                    </div>
-                    
-                    <div class="mb-3" id="divNouveauLivreurModal" style="display: none;">
-                        <label class="form-label">
-                            <i class="fas fa-user"></i> Nouveau livreur
-                        </label>
-                        <select class="form-select" name="nouveau_driver_id">
-                            <option value="">Choisir un livreur disponible</option>
-                           @foreach($livreurs as $livreur)
-                          <option value="{{ $livreur->id }}">{{ $livreur->name }}</option>
-                           @endforeach
-
-                        </select>
-                        <small class="form-text text-muted">
-                            Sélectionnez un livreur disponible pour reprendre cette livraison
-                        </small>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">
-                            <i class="fas fa-comment"></i> Commentaire administrateur *
-                        </label>
-                        <textarea class="form-control" name="commentaire_admin" rows="4" required 
-                                  placeholder="Décrivez l'action prise et les instructions données..."></textarea>
-                        <small class="form-text text-muted">
-                            Ce commentaire sera visible dans l'historique de la commande
-                        </small>
-                    </div>
-                    
-                    <div class="alert alert-info">
-                        <i class="fas fa-info-circle"></i>
-                        <strong>Note:</strong> Le livreur et le client seront automatiquement notifiés de l'action prise.
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                        <i class="fas fa-times"></i> Annuler
-                    </button>
-                    <button type="submit" class="btn btn-warning">
-                        <i class="fas fa-check"></i> Traiter le Problème
-                    </button>
-                </div>
-            </form>
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="formTraiterProbleme" method="POST" action="">
+        @csrf
+        <div class="modal-header">
+          <h5 class="modal-title">Traiter le problème</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
+        <div class="modal-body">
+          <!-- Ici tes champs de formulaire, par ex : -->
+          <label>Action</label>
+          <select name="action" class="form-select" required>
+            <option value="">Choisir une action</option>
+            <option value="resolu">Marquer comme résolu</option>
+            <option value="reassigner">Réassigner</option>
+            <option value="annuler">Annuler</option>
+          </select>
+
+          <label class="mt-3">Commentaire</label>
+          <textarea name="commentaire_admin" class="form-control" required></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+          <button type="submit" class="btn btn-warning">Traiter le problème</button>
+        </div>
+      </form>
     </div>
+  </div>
 </div>
+
 
 <!-- Modal pour agrandir les images -->
 <div class="modal fade" id="modalImage" tabindex="-1">
@@ -299,45 +253,14 @@ document.querySelectorAll('[data-filter]').forEach(button => {
 
 // Traiter un problème
 function traiterProbleme(livraisonId) {
-fetch(`/admin/livraisons/${livraisonId}/json`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.probleme) {
-                const probleme = data.probleme;
-                document.getElementById('detailsProblemeModal').innerHTML = `
-                    <div class="card bg-light">
-                        <div class="card-body">
-                            <h6><i class="fas fa-exclamation-triangle text-warning"></i> Détails du problème</h6>
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <p><strong>Commande:</strong> #${data.livraison.id}</p>
-                                    <p><strong>Client:</strong> ${data.livraison.client_name}</p>
-                                    <p><strong>Livreur:</strong> ${data.livraison.driver_name}</p>
-                                </div>
-                                <div class="col-md-6">
-                                    <p><strong>Type:</strong> ${probleme.type_probleme.replace('_', ' ')}</p>
-                                    <p><strong>Signalé le:</strong> ${new Date(probleme.date_signalement).toLocaleString()}</p>
-                                </div>
-                            </div>
-                            <p><strong>Description:</strong></p>
-                            <p class="text-muted">${probleme.description}</p>
-                            ${probleme.photo ? `
-                                <p><strong>Photo:</strong></p>
-                                <img src="/storage/${probleme.photo}" class="img-fluid rounded" style="max-height: 150px;">
-                            ` : ''}
-                        </div>
-                    </div>
-                `;
-                
-                document.getElementById('formTraiterProbleme').action = `/admin/livraisons/${livraisonId}/resoudre-probleme`;
-                new bootstrap.Modal(document.getElementById('modalTraiterProbleme')).show();
-            }
-        })
-        .catch(error => {
-            console.error('Erreur:', error);
-            alert('Erreur lors du chargement des détails du problème');
-        });
+  // Mettre l'URL POST correcte dans l'attribut action du formulaire
+  document.getElementById('formTraiterProbleme').action = `/admin/livraisons/${livraisonId}/resoudre-probleme`;
+  
+  // Ouvrir le modal Bootstrap
+  var modal = new bootstrap.Modal(document.getElementById('modalTraiterProbleme'));
+  modal.show();
 }
+
 
 // Gestion de l'affichage du champ nouveau livreur
 document.querySelector('select[name="action"]').addEventListener('change', function() {
